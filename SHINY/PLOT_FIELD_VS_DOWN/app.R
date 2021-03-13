@@ -7,6 +7,18 @@
 #    http://shiny.rstudio.com/
 #
 
+rm(list = ls())
+
+library(DBI)
+library(RSQLite)
+library(nflfastR)
+library(tidyverse)
+library(gt)
+library(ggimage)
+library(ggplot2)
+library(ggrepel)
+
+
 library(shiny)
 
 # Define UI for application that draws a histogram
@@ -72,7 +84,7 @@ server <- function(input, output) {
    
    output$plot <- renderPlot({
   
-     path <- "/Users/joeybloom/Desktop/NFLScrapR/database/pbp_db"
+     path <- "pbp_db"
      connection <- dbConnect(SQLite(), path)
      pbp_db <- tbl(connection, "nflfastR_pbp")
      colors <- tbl(connection, "team_color_logos")
@@ -232,6 +244,8 @@ server <- function(input, output) {
      else{
        view_qb_epa_by_down(min_year,max_year,min_week,max_week,highlight_names,metric)
      }
+     
+     #dbDisconnect(connection)
      
    },height=650,width=800)
 }
