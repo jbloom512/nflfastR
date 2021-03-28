@@ -105,6 +105,14 @@ server <- function(input, output) {
      highlight_names <- name %>% strsplit(",") %>% as.vector()
      highlight_names <- highlight_names[[1]]
      
+     for (i in 1:length(highlight_names)) {
+       highlight_names[[i]] <- str_trim(highlight_names[[i]])
+     }
+     
+     
+     
+     print(highlight_names)
+     
      #### QB PLOTTER  ####
      view_qb_epa_by_down <- function(min_year,max_year,min_week,max_week,highlight_qb,highlight_field) {
        
