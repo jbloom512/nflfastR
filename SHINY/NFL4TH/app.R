@@ -4,6 +4,8 @@ library(nfl4th)
 library(tidyverse)
 library(gt)
 library(ggplot2)
+library(ggrepel)
+library(ggimage)
 
 theme_set(  theme_classic() +
               theme(axis.title = element_text(size = 16),
@@ -69,8 +71,12 @@ server <- function(input, output) {
 
 
      
-     all_dec <- read.csv("nfl4th_all_dec_2014_2020.csv")
+     all_dec <- read.csv("nfl4th_all_dec_2014_2020.csv") %>% 
+       as_tibble() %>% 
+       mutate(team_logo_espn = ifelse(posteam %in% highlight_names,as.character(team_logo_espn),as.character(NULL)))
 
+     
+     
      all_dec %>% 
        ggplot(aes(x = season, y = go_rate, group = posteam)) +
        geom_smooth(group=1,
@@ -79,15 +85,16 @@ server <- function(input, output) {
                    size = 1) +
        geom_path(aes(x = season, y = go_rate), 
                  color = all_dec$team_color,
-                 alpha = ifelse(all_dec$posteam %in% highlight_names,4/5,1/5),
+                 alpha = ifelse(all_dec$posteam %in% highlight_names,7/8,1/8),
                  size = ifelse(all_dec$posteam %in% highlight_names,1,.5)
        ) + 
+       geom_image(aes(image = team_logo_espn), size = 0.05, asp = 16/9) +
        geom_text_repel(label = ifelse(all_dec$posteam %in% highlight_names & all_dec$season == 2014,
                                 as.character(all_dec$posteam),'')) +
        geom_hline(yintercept = .5,color='red',linetype='dotted') + 
        labs(
          title = 'Fourth Down Go Rate',
-         subtitle = paste0(TEAM,', 2015 - 2020, Go Boost > 1'),
+         subtitle = paste0(TEAM,', 2014 - 2020, Go Boost > 1'),
          x = 'Season',
          y = 'Go Rate',
          caption = "@data_bears (Data from nflfastR + Ben Baldwin's nfl4th Model)"

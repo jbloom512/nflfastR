@@ -6,6 +6,7 @@ library(nfl4th)
 library(tidyverse)
 library(gt)
 library(ggplot2)
+library(ggrepel)
 
 theme_set(  theme_classic() +
               theme(axis.title = element_text(size = 12),
