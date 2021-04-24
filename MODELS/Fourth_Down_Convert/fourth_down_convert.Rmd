@@ -10,13 +10,13 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 In order to assess a team's ability to convert for a first down in situations they need to, we will build a few machine learning models to predict the probability a team will convert for a first down on 3rd down or 4th down (if they go for it). 
 
-The overall goal is to measure how effective teams are in 3rd/4th down situations compared to what is expected. We will use the model to evaluate the probability a team converts for a first down and compare that to the actual play result. This will let us see much a team performed over (or under) the expected play result. 
+The overall goal is to measure how effective teams are in 3rd/4th down situations compared to what is expected. We will use the model to evaluate the probability a team converts for a first down and compare that to the actual play result. This will let us see how much a team performed over (or under) the expected play result. 
 
 For example, if a team has a probability of 90% to convert a first down, and they do, they beat expectations by 10%. If they fail, they are under expectations by 90%. 
 
 To measure this, we will calculate the field "First Down Over Expected" once the models are created.
 
-This model is built using the framework created by Ben Baldwin. For more information on that, see this code:
+This dataset is built using the framework created by Ben Baldwin. For more information on that, see this code:
 https://github.com/guga31bb/fourth_calculator/blob/main/scripts/_go_for_it_model.R 
 
 ## Setting up the Model
@@ -377,7 +377,7 @@ To get an idea of what the data looks like, we can summarize all the numeric att
 A few things to note:
 
 * There are a lot of null values for `air_yards` and `yards_after_catch`. Dropback attempts with no actual pass attempt (IE sacks) result in null `air_yards` and incomplete passes result in null `yards_after_catch`.
-* Teams pass about 82.5% of the time and set up in shot gun about 84.4% of the time on 3rd/4th down
+* Teams pass about 82.5% of the time and set up in shot gun about 84.4% of the time on 3rd/4th down.
 
 
 
@@ -408,9 +408,9 @@ Yards to go has the strongest correlation with first down conversion rate. As ya
 
 There are additional attributes that are strongly correlated with one another. 
 
-* Positive correlation between score differential and win probability
-* Negative correlation between yard line 100 and expected points
-* Negative correlation between game seconds remaining and rush/pass yards gained total. As time decreases, total yards over time increases
+* Positive correlation between score differential and win probability.
+* Negative correlation between yard line 100 and expected points.
+* Negative correlation between game seconds remaining and rush/pass yards gained total. As time decreases, total yards over time increases.
 * Positive correlations between EPA and total yards gained sum/average fields (both rushes and passes). More yards/higher average yards generally leads to higher EPA.
  
 
@@ -520,7 +520,7 @@ h2o.confusionMatrix(glm_base_cvrt)
 h2o.accuracy(glm_base_cvrt) %>% arrange(desc(accuracy)) %>% head(5)
 ```
 
-The main metrics I look at are AUC and Log Loss. AUC is a good measure for how good the overall model is across many different cutoff points whereas Log Loss helps indicate how correct the model's prediction was by comparing the true result to the predicted probabilty (using log functions). Good models have high AUC and low Log Loss (both measured between 0 and 1).
+The main metrics I look at are AUC and Log Loss. AUC is a measure for how good the overall model is across many different cutoff points whereas Log Loss helps indicate how correct the model's prediction was by comparing the true result to the predicted probabilty (using log functions). Good models have high AUC and low Log Loss (both measured between 0 and 1).
 
 For more information, you can refer to this link from the "Hands on Machine Learning with R" book:
 
@@ -575,7 +575,7 @@ h2o.varimp(cvrt_rf) %>%
 
 
 #####Train Summary
-Similar to the GLM model, yards to go is the most important feature, with yard line and possession team total being strong predictiors as well.
+Similar to the GLM model, yards to go is the most important feature, with yard line and possession team total being strong predictors as well.
 
 Some differences between the 2 models - game seconds remaining has much more importance in the RF model than it does in the GLM. Additionally, cumulative total passing EPA and yards gained, as well as average air yards hold more weight in the RF model than the GLM. The RF model favors using the passing attributes much more than it does the rushing attributes and these fields also hold a fair amount more importance in the RF model.
 
@@ -596,41 +596,12 @@ h2o.accuracy(rf_base_cvrt) %>% arrange(desc(accuracy)) %>% head(5)
 ```
 
 
+####Calibration Plots
 
-The GLM model is performing slightly better than the RF model based on AUC and Log Loss (higher AUC and lower Log Loss).
+To make it easier to evaluate each model, I create a function that works with our dataset to create calibration plots inspired by the Yurko et al. paper.
 
-```
-RF:
-LogLoss:  0.6371137
-AUC:      0.67431
-
-GLM:
-LogLoss:  0.6273489
-AUC:      0.68967
-```
-
-More tuning can be done to improve each model, but for now, let's take a look at some of the predictions on the test data using the GLM model.
-
-
-
-##First Downs Over Expected (FDOE)
-
-In order to evaluate the test data, we will calculate the field "FDOE", which represents "First Down Over Expected".
-
-This is calculated by taking the result of the play (first down = 1 or first down = 0) and subtracting the probability the play would result in a first down (0 - 1).
-
-For example:
- - if a play had a 75% chance of resulting in a first down, and it does result in a first down:
-   fdoe = first_down - prob_succeed => 1 - .75 => .25
-
- - if a play had a 75% chance of resulting in a first down, and it does not result in a first down:
-   fdoe = first_down - prob_succeed => 0 - .75 => -.75
-   
-We can take the total FDOE per play by team to get an idea of which teams were good at converting on 3rd/4th downs.
-
-
-```{r warning=FALSE, fig.width=10, fig.height=10}
-
+We will use the models to make predictions on the test data and then display the results using the calibration plots.
+```{r warning=FALSE}
 
 
 
@@ -653,20 +624,9 @@ test_preds <- test %>% as_tibble() %>%
       select(prob_fail_rf,prob_succeed_rf)
   ) %>% 
   select(desc,game_id,play_id,season,week,qtr,down,ydstogo,yardline_100,posteam,pass,starts_with("yards_gained_"),
-         down,ep,wp,first_down,prob_fail_glm,prob_succeed_glm,prob_fail_rf,prob_succeed_rf,team_logo_espn,team_color,team_color2) %>% 
-  mutate(fdoe_glm = first_down - prob_succeed_glm,
-         fdoe_rf  = first_down - prob_succeed_rf)
-
-## Save Predictions
-test_preds %>% write.csv("/Users/joeybloom/Desktop/NFLScrapR/GIT/nflfastR/MODELS/Fourth_Down_Convert/SHINY/2018_2020_GLM_FDOE.csv")
-
-```
+         down,ep,wp,first_down,prob_fail_glm,prob_succeed_glm,prob_fail_rf,prob_succeed_rf,team_logo_espn,team_color,team_color2) 
 
 
-#####Calibration Plots
-
-To make it easier to evaluate each model, I create a function that works with our dataset to create calibration plots inspired by the Yurko et al. paper.
-```{r warning=FALSE}
 plot_calibration <- function(model_type){
 
 prob_field <-paste0("prob_succeed_",model_type) 
@@ -730,7 +690,56 @@ plot_calibration('rf')
 
 ```
 
+
+####Final Results
+The GLM model is performing slightly better than the RF model based on AUC and Log Loss (higher AUC and lower Log Loss).
+
+```
+RF:
+LogLoss:  0.6371137
+AUC:      0.67431
+
+GLM:
+LogLoss:  0.6273489
+AUC:      0.68967
+```
+
+More tuning can be done to improve each model, but for now, let's take a look at some of the predictions on the test data using the GLM model.
+
+
+
+##First Downs Over Expected (FDOE)
+
+In order to evaluate the test data, we will calculate the field "FDOE", which represents "First Down Over Expected".
+
+This is calculated by taking the result of the play (first down = 1 or first down = 0) and subtracting the probability the play would result in a first down (0 - 1).
+
+For example:
+ - if a play had a 75% chance of resulting in a first down, and it does result in a first down:
+   fdoe = first_down - prob_succeed => 1 - .75 => .25
+
+ - if a play had a 75% chance of resulting in a first down, and it does not result in a first down:
+   fdoe = first_down - prob_succeed => 0 - .75 => -.75
+   
+We can take the total FDOE per play by team to get an idea of which teams were good at converting on 3rd/4th downs.
+
+
+```{r warning=FALSE, fig.width=10, fig.height=10}
+
+test_preds <- test_preds %>% 
+  mutate(fdoe_glm = first_down - prob_succeed_glm,
+         fdoe_rf  = first_down - prob_succeed_rf)
+
+## Save Predictions
+test_preds %>% write.csv("/Users/joeybloom/Desktop/NFLScrapR/GIT/nflfastR/MODELS/Fourth_Down_Convert/SHINY/2018_2020_GLM_FDOE.csv")
+
+```
+
+
+
 Using the GLM model, let's see what First Downs over Expected looks like since 2018 by team.
+
+
 ```{r warning=FALSE,message=FALSE,fig.height=8,fig.width=10}
 
 ## View Teams by FDOE
@@ -902,7 +911,7 @@ For my first model in the NFL world, there are a couple of takeaways I have from
 
 Though it probably was obvious, yards to go is the biggest predictor in whether or not the result will be a first down. It also appears that using some form of moving averages and/or cumulative sums to track in game stats can help improve the model.
 
-The initial findings on the 2018-2020 seasons help shed some light on who did well and who struggled on 3rd/4th downs relative to what was expected. Baltimore has been converting on 3rd/4th down at a rate much higher than expected where the Jets are the exact opposite. Much of this is contributed to the position each team finds themselves on 3rd/4th down (easy versus hard to convert), and in Baltimore's case, their rushing success.
+The initial findings on the 2018-2020 seasons help shed some light on who did well and who struggled on 3rd/4th downs relative to what was expected. Baltimore has been converting on 3rd/4th down at a rate much higher than expected whereas the Jets are the exact opposite. Much of this is contributed to the position each team finds themselves on 3rd/4th down (easy versus hard to convert), and in Baltimore's case, their rushing success.
 
 Some next steps to enhance what has been done here would looking to refine the in game stats, for example, looking back at "N" plays instead of the whole  game (IE, avg yards gained on previous 3/5/10 plays). It would also be useful to look at early downs to see what kind of decisions  teams are making and how the play results impact their probality of converting on 3rd/4th down. We could look at FDOE for individual players to get a better understanding of a team's FDOE or look at which defenses are most effective on 3rd/4th downs. Additionally, just like the 4th down model from Ben Baldwin that inspired this article, this model could be used within a larger framework to help make decisions about what to do on 4th downs.
 
