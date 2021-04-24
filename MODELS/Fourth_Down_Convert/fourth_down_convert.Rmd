@@ -12,11 +12,11 @@ In order to assess a team's ability to convert for a first down in situations th
 
 The overall goal is to measure how effective teams are in 3rd/4th down situations compared to what is expected. We will use the model to evaluate the probability a team converts for a first down and compare that to the actual play result. This will let us see much a team performed over (or under) the expected play result. 
 
-For example, if a team has a probability 90% to convert a first down, and they do, they beat expectations by 10%. If they fail, they are under expectations by 90%. 
+For example, if a team has a probability of 90% to convert a first down, and they do, they beat expectations by 10%. If they fail, they are under expectations by 90%. 
 
 To measure this, we will calculate the field "First Down Over Expected" once the models are created.
 
-This model is built using the framework created by Ben Baldwin. For more information on that, see this article:
+This model is built using the framework created by Ben Baldwin. For more information on that, see this code:
 https://github.com/guga31bb/fourth_calculator/blob/main/scripts/_go_for_it_model.R 
 
 ## Setting up the Model
@@ -404,7 +404,7 @@ We can also look to see what attributes are correlated to one another. Below is 
  corrplot(c,tl.cex=.8,tl.col="black")
 ```
 
-Yards to go has the strongest correlation with first down conversion rate. As yards to go increases, the probabiliy of converting drops. This is obvious. We can see that the shotgun indicator also has a negative correlation with conversion rate, likely because shotgun and yards to go are also positivley correlated with one another. 
+Yards to go has the strongest correlation with first down conversion rate. As yards to go increases, the probabiliy of converting drops. This is obvious. We can see that the shotgun indicator also has a negative correlation with conversion rate, likely because shotgun and yards to go are also positivley correlated. 
 
 There are additional attributes that are strongly correlated with one another. 
 
@@ -579,7 +579,7 @@ Similar to the GLM model, yards to go is the most important feature, with yard l
 
 Some differences between the 2 models - game seconds remaining has much more importance in the RF model than it does in the GLM. Additionally, cumulative total passing EPA and yards gained, as well as average air yards hold more weight in the RF model than the GLM. The RF model favors using the passing attributes much more than it does the rushing attributes and these fields also hold a fair amount more importance in the RF model.
 
-Another difference to note between the 2 models is that the RF model is not as dominated by yards to go as the GLM model is. In both models, yards to go is the most important feature by a significant amount, but looking at the graphs, it is clear that the dropoff in importance on the GLM model is larger than it is on the RF model after yards to go. In this case, there is about a 25k difference (RF relative importance is based on whether a field was selected to split on during the tree building process and how much the squared error improved as a result - source h2o) between the top 2 most important fields. It is also worth noting that the other attributes after the top field hold more weight in the RF model than in the GLM model.
+Another difference to note between the 2 models is that the RF model is not as dominated by yards to go as the GLM model is. In both models, yards to go is the most important feature by a significant amount, but looking at the graphs, it is clear that the dropoff in importance on the GLM model is larger than it is on the RF model after yards to go. In this case, there is about a 25k difference (RF relative importance is based on whether a field was selected to split on during the tree building process and how much the squared error improved as a result - source h2o) between the top 2 most important fields. It is also worth noting that the other attributes after the top field hold more weight in the RF model than they do in the GLM model.
 
 #####Test Results
 
@@ -786,15 +786,16 @@ Since 2018, in the regular season, Chicago ranks 4th worst in FDOE throughout th
 
 On the contrary, Baltimore ranks the highest with a total of 36.49 holding a fairly large gap above the next best team (ATL - 26.99).
 
-Surprisingly, New England has the 2nd worst FDOE with -21.76 total FDOE.
+Surprisingly (at least to me), New England has the 2nd worst FDOE with -21.76 total FDOE.
 
 Half of the teams in the league have an FDOE above 0 since 2018. 
 
 To play around with these results some more, visit this Shiny Dashboard below:
+
 https://nflpredictor.shinyapps.io/3rd_4th_converter/
 
-Let's take a look at each team's probability of converting verse their total FDOE.
-```{r warning=FALSE,fig.height=8,fig.width=10}
+Let's take a look at each team's average probability of converting verses their total FDOE.
+```{r warning=FALSE,message=FALSE,fig.height=8,fig.width=10}
 
 
 avg <- test_preds %>% 
@@ -838,9 +839,9 @@ avg %>%
 
 ```
 
-Baltimore puts themselves in much better situations on 3rd/4th downs compared to the Jets. Baltimore's average probability of converting is above the average whereas the Jets' rank last.  
+Comparing the best and the worst teams in FDOE, Baltimore puts themselves in much better situations on 3rd/4th downs compared to the Jets. Baltimore's average probability of converting is above the average whereas the Jets' rank last.  
 
-What makes Baltimore's situations that much better than the Jets? Let's take a look at the average pass rate versus yards to go.
+What makes Baltimore's situations that much better than the Jets? We can look at the average pass rate versus yards to go for each team.
 
 ```{r warning=FALSE,message=FALSE,fig.height=8,fig.width=10}
 avg %>% 
@@ -865,7 +866,7 @@ avg %>%
         legend.position = "none") 
 ```
 
-Baltimore is below the league average in yards to go on 3rd/4th downs whereas the Jets rank near the bottom. There is a clear trend between pass rate and yards to go, and Baltimore has the lowest pass rate (highest rush rate) by far throughout the league. Wonder why Baltimore's rush rate is so high? We will look at how good they are on rush plays.
+Baltimore is well below the league average in yards to go on 3rd/4th downs whereas the Jets rank near the bottom. There is a trend between pass rate and yards to go, and Baltimore has the lowest pass rate (highest rush rate) by far throughout the league. Wonder why Baltimore's rush rate is so high? We can assess how good they are on rush plays.
 
 ```{r warning=FALSE,message=FALSE,fig.height=8,fig.width=10}
 avg %>% 
@@ -892,7 +893,7 @@ avg %>%
 ```
 
 
-Baltimore is not passing that much on 3rd/4th down because they perform so well on the rush. They by far have the highest "Total Rush Yards Gained" on 3rd/4th downs throughout the league and we can see a clear trend between pass rate and "Total Rush Yards Gained". When a team is doing well on the rush in these situations, they are going to rush more than they pass.
+Baltimore is not passing that much on 3rd/4th down because they perform so well on the rush. They by far have the highest average "Total Rush Yards Gained" throughout the league and we can see a clear trend between pass rate on 3rd/4th down and average "Total Rush Yards Gained". When a team is rushing the ball well, their pass rate generally will decrease on 3rd/4th downs.
 
 
 ##Summary
@@ -901,7 +902,7 @@ For my first model in the NFL world, there are a couple of takeaways I have from
 
 Though it probably was obvious, yards to go is the biggest predictor in whether or not the result will be a first down. It also appears that using some form of moving averages and/or cumulative sums to track in game stats can help improve the model.
 
-The initial findings on the 2018-2020 shed some light on who did well and who struggled on 3rd/4th downs relative to what was expected. Baltimore has been converting on 3rd/4th down at a rate much higher than expected where the Jets are the exact opposite. Much of this is contributed to the position each team finds themselves on 3rd/4th down (easy versus hard to convert), and in Baltimore's case, their rushing success.
+The initial findings on the 2018-2020 seasons help shed some light on who did well and who struggled on 3rd/4th downs relative to what was expected. Baltimore has been converting on 3rd/4th down at a rate much higher than expected where the Jets are the exact opposite. Much of this is contributed to the position each team finds themselves on 3rd/4th down (easy versus hard to convert), and in Baltimore's case, their rushing success.
 
 Some next steps to enhance what has been done here would looking to refine the in game stats, for example, looking back at "N" plays instead of the whole  game (IE, avg yards gained on previous 3/5/10 plays). It would also be useful to look at early downs to see what kind of decisions  teams are making and how the play results impact their probality of converting on 3rd/4th down. We could look at FDOE for individual players to get a better understanding of a team's FDOE or look at which defenses are most effective on 3rd/4th downs. Additionally, just like the 4th down model from Ben Baldwin that inspired this article, this model could be used within a larger framework to help make decisions about what to do on 4th downs.
 
