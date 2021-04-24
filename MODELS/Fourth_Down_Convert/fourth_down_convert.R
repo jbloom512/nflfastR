@@ -797,3 +797,100 @@ fourth_preds %>%
 
 
 
+
+avg %>% 
+  ggplot(aes(x = avg_yds_togo, y = avg_pass)) + 
+  geom_image(aes(x = avg_yds_togo, y = avg_pass,image = team_logo_espn),asp = 16/9,size=.027) +
+  geom_vline(xintercept = mean(avg$avg_pass), color = 'red', linetype = 'dotted') +
+  geom_hline(yintercept = mean(avg$avg_yds_togo), color = 'red', linetype = 'dotted') +
+  labs(
+    y = "Pass Rate",
+    x = 'Average Yards to Go',
+    title = 'Average Pass Rate vs Average Yards to Go',
+    subtitle = '2018 - 2020, Weeks 1-17, Quarters 1-5, 3rd/4th Downs, Rush + Pass Plays, FDOE calculated from Generalized Linear Model',
+    caption = "Joey Bloom - @data_bears (Data - nflfastR)"
+  ) +
+  theme_classic() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        plot.title = element_text(size = 13, hjust = 0.5),
+        plot.subtitle = element_text(size = 8, hjust = 0.5),
+        plot.caption = element_text(size = 7),
+        legend.position = "none") 
+
+
+
+
+
+
+avg %>% 
+  ggplot(aes(x = total_fdoe, y = avg_total_rush_yds_gained)) + 
+  geom_image(aes(x = total_fdoe, y = avg_total_rush_yds_gained,image = team_logo_espn),asp = 16/9,size=.027) +
+  geom_hline(yintercept = mean(avg$avg_total_rush_yds_gained), color = 'red', linetype = 'dotted') +
+  geom_vline(xintercept = mean(avg$total_fdoe), color = 'red', linetype = 'dotted') +
+  labs(
+    y = "Pass Rate",
+    x = 'Total FDOE',
+    title = 'Average Total Rush Yards Gained vs Total FDOE',
+    subtitle = '2018 - 2020, Weeks 1-17, Quarters 1-5, 3rd/4th Downs, Rush + Pass Plays, FDOE calculated from Generalized Linear Model',
+    caption = "Joey Bloom - @data_bears (Data - nflfastR)"
+  ) +
+  theme_classic() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        plot.title = element_text(size = 13, hjust = 0.5),
+        plot.subtitle = element_text(size = 8, hjust = 0.5),
+        plot.caption = element_text(size = 7),
+        legend.position = "none") 
+
+
+
+
+
+
+
+
+
+avg %>% 
+  ggplot(aes(x = avg_pass, y = avg_total_rush_yds_gained)) + 
+  geom_image(aes(x = avg_pass, y = avg_total_rush_yds_gained,image = team_logo_espn),asp = 16/9,size=.027) +
+  geom_hline(yintercept = mean(avg$avg_total_rush_yds_gained), color = 'red', linetype = 'dotted') +
+  geom_vline(xintercept = mean(avg$avg_pass), color = 'red', linetype = 'dotted') +
+  labs(
+    x = "Pass Rate",
+    y = 'Average Total Rush Yards Gained',
+    title = 'Average Total Rush Yards Gained vs Pass Rate',
+    subtitle = '2018 - 2020, Weeks 1-17, Quarters 1-5, 3rd/4th Downs, Rush + Pass Plays, FDOE calculated from Generalized Linear Model',
+    caption = "Joey Bloom - @data_bears (Data - nflfastR)"
+  ) +
+  theme_classic() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        plot.title = element_text(size = 13, hjust = 0.5),
+        plot.subtitle = element_text(size = 8, hjust = 0.5),
+        plot.caption = element_text(size = 7),
+        legend.position = "none") 
+
+
+
+
+
+avg %>% 
+  ggplot(aes(x = avg_pass, y = total_fdoe)) + 
+  geom_image(aes(x = avg_pass, y = total_fdoe,image = team_logo_espn),asp = 16/9,size=.027) +
+  geom_hline(yintercept = mean(avg$total_fdoe), color = 'red', linetype = 'dotted') +
+  geom_vline(xintercept = mean(avg$avg_pass), color = 'red', linetype = 'dotted') +
+  labs(
+    x = "Pass Rate",
+    y = 'Total FDOE',
+    title = 'Total FDOE vs Pass Rate',
+    subtitle = '2018 - 2020, Weeks 1-17, Quarters 1-5, 3rd/4th Downs, Rush + Pass Plays, FDOE calculated from Generalized Linear Model',
+    caption = "Joey Bloom - @data_bears (Data - nflfastR)"
+  ) +
+  theme_classic() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        plot.title = element_text(size = 13, hjust = 0.5),
+        plot.subtitle = element_text(size = 8, hjust = 0.5),
+        plot.caption = element_text(size = 7),
+        legend.position = "none") 

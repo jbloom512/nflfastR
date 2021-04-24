@@ -203,7 +203,7 @@ As a next step, we will calculate moving averages and cumulative sums for rush a
 To do this, we take several variables and create moving averages / cumulative sums grouped by game and possesion team.
 
 #####Passing Stats
-```{r warning=FALSE}
+```{r warning=FALSE,message=FALSE}
 
 ## Pass Play Fields ##
 cum_fields <- c('epa','yards_gained','air_yards','yards_after_catch')
@@ -250,7 +250,7 @@ p_game_summary_t3 %>%
 
 
 #####Rushing Stats
-```{r warning=FALSE}
+```{r warning=FALSE,message=FALSE}
 ## Rush Play Fields ##
 cum_fields <- c('epa','yards_gained')
 
@@ -652,7 +652,7 @@ test_preds <- test %>% as_tibble() %>%
              prob_succeed_rf = p1) %>% 
       select(prob_fail_rf,prob_succeed_rf)
   ) %>% 
-  select(desc,game_id,play_id,season,week,qtr,down,ydstogo,yardline_100,posteam,
+  select(desc,game_id,play_id,season,week,qtr,down,ydstogo,yardline_100,posteam,pass,starts_with("yards_gained_"),
          down,ep,wp,first_down,prob_fail_glm,prob_succeed_glm,prob_fail_rf,prob_succeed_rf,team_logo_espn,team_color,team_color2) %>% 
   mutate(fdoe_glm = first_down - prob_succeed_glm,
          fdoe_rf  = first_down - prob_succeed_rf)
@@ -716,7 +716,7 @@ cal_plot %>%
 ```
 
 ######GLM
-```{r warning=FALSE, fig.width=7, fig.height=7}
+```{r warning=FALSE, message=FALSE, fig.width=7, fig.height=7}
 
 plot_calibration('glm')
 
@@ -724,14 +724,14 @@ plot_calibration('glm')
 
 
 ######RF
-```{r warning=FALSE, fig.width=7, fig.height=7}
+```{r warning=FALSE, message=FALSE, fig.width=7, fig.height=7}
 
 plot_calibration('rf')
 
 ```
 
 Using the GLM model, let's see what First Downs over Expected looks like since 2018 by team.
-```{r warning=FALSE,fig.height=8,fig.width=10}
+```{r warning=FALSE,message=FALSE,fig.height=8,fig.width=10}
 
 ## View Teams by FDOE
 plt <- test_preds %>% 
@@ -793,15 +793,117 @@ Half of the teams in the league have an FDOE above 0 since 2018.
 To play around with these results some more, visit this Shiny Dashboard below:
 https://nflpredictor.shinyapps.io/3rd_4th_converter/
 
+Let's take a look at each team's probability of converting verse their total FDOE.
+```{r warning=FALSE,fig.height=8,fig.width=10}
+
+
+avg <- test_preds %>% 
+  filter(qtr %in% c(1,2,3,4,5),
+         season %in% c(2018,2019,2020),
+         week >= 1 & week <= 17,
+         down %in% c(3,4)) %>% 
+  group_by(team_logo_espn,posteam) %>% 
+  summarize(
+    avg_yds_togo = mean(ydstogo),
+    avg_pass = mean(pass),
+    avg_total_rush_yds_gained = mean(yards_gained_cum_game_tot_RUSH,na.rm=TRUE),
+    avg_prob_succeed = mean(prob_succeed_glm),
+    total_fdoe = sum(fdoe_glm)
+  )
+
+
+
+
+avg %>% 
+  ggplot(aes(x = total_fdoe, y = avg_prob_succeed)) + 
+  geom_image(aes(x = total_fdoe, y = avg_prob_succeed,image = team_logo_espn),asp = 16/9,size=.027) +
+  geom_hline(yintercept = mean(avg$avg_prob_succeed), color = 'red', linetype = 'dotted') +
+  geom_vline(xintercept = mean(avg$total_fdoe), color = 'red', linetype = 'dotted') +
+  labs(
+    x = "Total FDOE",
+    y = 'Average Prob Convert',
+    title = 'Average Probability of Converting vs Total FDOE',
+    subtitle = '2018 - 2020, Weeks 1-17, Quarters 1-5, 3rd/4th Downs, Rush + Pass Plays, FDOE/Avg Prob Convert calculated from Generalized Linear Model',
+    caption = "Joey Bloom - @data_bears (Data - nflfastR)"
+  ) +
+  theme_classic() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        plot.title = element_text(size = 13, hjust = 0.5),
+        plot.subtitle = element_text(size = 8, hjust = 0.5),
+        plot.caption = element_text(size = 7),
+        legend.position = "none") 
+
+
+
+```
+
+Baltimore puts themselves in much better situations on 3rd/4th downs compared to the Jets. Baltimore's average probability of converting is above the average whereas the Jets' rank last.  
+
+What makes Baltimore's situations that much better than the Jets? Let's take a look at the average pass rate versus yards to go.
+
+```{r warning=FALSE,message=FALSE,fig.height=8,fig.width=10}
+avg %>% 
+  ggplot(aes(x = avg_yds_togo, y = avg_pass)) + 
+  geom_smooth(aes(x = avg_yds_togo, y = avg_pass), method = "lm") +
+  geom_image(aes(x = avg_yds_togo, y = avg_pass,image = team_logo_espn),asp = 16/9,size=.027) +
+  geom_hline(yintercept = mean(avg$avg_pass), color = 'red', linetype = 'dotted') +
+  geom_vline(xintercept = mean(avg$avg_yds_togo), color = 'red', linetype = 'dotted') +
+  labs(
+    y = "Pass Rate",
+    x = 'Average Yards to Go',
+    title = 'Average Pass Rate vs Average Yards to Go',
+    subtitle = '2018 - 2020, Weeks 1-17, Quarters 1-5, 3rd/4th Downs, Rush + Pass Plays, FDOE calculated from Generalized Linear Model',
+    caption = "Joey Bloom - @data_bears (Data - nflfastR)"
+  ) +
+  theme_classic() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        plot.title = element_text(size = 13, hjust = 0.5),
+        plot.subtitle = element_text(size = 8, hjust = 0.5),
+        plot.caption = element_text(size = 7),
+        legend.position = "none") 
+```
+
+Baltimore is below the league average in yards to go on 3rd/4th downs whereas the Jets rank near the bottom. There is a clear trend between pass rate and yards to go, and Baltimore has the lowest pass rate (highest rush rate) by far throughout the league. Wonder why Baltimore's rush rate is so high? We will look at how good they are on rush plays.
+
+```{r warning=FALSE,message=FALSE,fig.height=8,fig.width=10}
+avg %>% 
+  ggplot(aes(x = avg_pass, y = avg_total_rush_yds_gained)) + 
+  geom_smooth(aes(x = avg_pass, y = avg_total_rush_yds_gained), method = "lm") +
+  geom_image(aes(x = avg_pass, y = avg_total_rush_yds_gained,image = team_logo_espn),asp = 16/9,size=.027) +
+  geom_hline(yintercept = mean(avg$avg_total_rush_yds_gained), color = 'red', linetype = 'dotted') +
+  geom_vline(xintercept = mean(avg$avg_pass), color = 'red', linetype = 'dotted') +
+  labs(
+    x = "Pass Rate",
+    y = 'Average Total Rush Yards Gained',
+    title = 'Average Total Rush Yards Gained vs Pass Rate',
+    subtitle = '2018 - 2020, Weeks 1-17, Quarters 1-5, 3rd/4th Downs, Rush + Pass Plays, FDOE calculated from Generalized Linear Model',
+    caption = "Joey Bloom - @data_bears (Data - nflfastR)"
+  ) +
+  theme_classic() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        plot.title = element_text(size = 13, hjust = 0.5),
+        plot.subtitle = element_text(size = 8, hjust = 0.5),
+        plot.caption = element_text(size = 7),
+        legend.position = "none") 
+
+```
+
+
+Baltimore is not passing that much on 3rd/4th down because they perform so well on the rush. They by far have the highest "Total Rush Yards Gained" on 3rd/4th downs throughout the league and we can see a clear trend between pass rate and "Total Rush Yards Gained". When a team is doing well on the rush in these situations, they are going to rush more than they pass.
+
+
 ##Summary
 
 For my first model in the NFL world, there are a couple of takeaways I have from this and some next steps.
 
 Though it probably was obvious, yards to go is the biggest predictor in whether or not the result will be a first down. It also appears that using some form of moving averages and/or cumulative sums to track in game stats can help improve the model.
 
-The initial findings on the 2018-2020 shed some light on who did well and who struggled on 3rd/4th downs relative to what was expected. Baltimore has been converting on 3rd/4th down at a rate much higher than expected where the Jets are the exact opposite.
+The initial findings on the 2018-2020 shed some light on who did well and who struggled on 3rd/4th downs relative to what was expected. Baltimore has been converting on 3rd/4th down at a rate much higher than expected where the Jets are the exact opposite. Much of this is contributed to the position each team finds themselves on 3rd/4th down (easy versus hard to convert), and in Baltimore's case, their rushing success.
 
-Some next steps to enhance what has been done here would looking to refine the in game stats, for example, looking back at "N" plays instead of the whole  game (IE, avg yards gained on previous 3/5/10 plays). We could also look at FDOE for individual players to see deeper into a team's FDOE or look at which defenses are most effective in these situations. Additionally, just like the 4th down model from Ben Baldwin that inspired this article, this model could be used within a larger framework to help make decisions about what to do on 4th downs.
+Some next steps to enhance what has been done here would looking to refine the in game stats, for example, looking back at "N" plays instead of the whole  game (IE, avg yards gained on previous 3/5/10 plays). It would also be useful to look at early downs to see what kind of decisions  teams are making and how the play results impact their probality of converting on 3rd/4th down. We could look at FDOE for individual players to get a better understanding of a team's FDOE or look at which defenses are most effective on 3rd/4th downs. Additionally, just like the 4th down model from Ben Baldwin that inspired this article, this model could be used within a larger framework to help make decisions about what to do on 4th downs.
 
 If you got this far, thank you so much for reading through and I hope you got something meaningful from this!
 

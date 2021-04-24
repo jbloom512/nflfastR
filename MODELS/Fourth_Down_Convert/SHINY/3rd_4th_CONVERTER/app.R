@@ -116,13 +116,15 @@ server <- function(input, output) {
          avg_fdoe =  mean(!!sym(model_fdoe))
        ) %>% 
        arrange(desc(total_fdoe)) %>% 
-       ungroup()
+       ungroup() %>% 
+       mutate(label_pos = ifelse(total_fdoe < 0, 2, -2)) 
      
      ## Create Plot
      plt %>% 
        ggplot(aes(x = reorder(posteam,total_fdoe), y = total_fdoe)) + 
        geom_bar(stat='identity',fill = plt$team_color,width = .7) +
        geom_image(aes(x=reorder(posteam,total_fdoe),y=total_fdoe,image = team_logo_espn),asp = 16/9,size=.027) +
+       geom_text(aes(x = reorder(posteam,total_fdoe), y = label_pos, label = round(total_fdoe,2)),size = 4) +
        labs(
          title = 'First Downs Over Expected',
          subtitle = paste0(min_season,' - ',max_season,', Weeks ',min_week,' - ',max_week,', Quarters - ',toString(quarters),', Downs - ',toString(downs),', Rush + Pass Plays, FDOE calculated from ',model,' Model'),
