@@ -1,0 +1,10 @@
+name: 3rd_4th_converter
+title:
+username:
+account: nflpredictor
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 3988126
+bundleId: 4487807
+url: https://nflpredictor.shinyapps.io/3rd_4th_converter/
+when: 1618779938.57965

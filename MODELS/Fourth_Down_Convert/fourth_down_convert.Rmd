@@ -1,0 +1,815 @@
+---
+title: "3rd/4th Down Converter"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+In order to assess a team's ability to convert for a first down in situations they need to, we will build a few machine learning models to predict the probability a team will convert for a first down on 3rd down or 4th down (if they go for it). 
+
+The overall goal is to measure how effective teams are in 3rd/4th down situations compared to what is expected. We will use the model to evaluate the probability a team converts for a first down and compare that to the actual play result. This will let us see much a team performed over (or under) the expected play result. 
+
+For example, if a team has a probability 90% to convert a first down, and they do, they beat expectations by 10%. If they fail, they are under expectations by 90%. 
+
+To measure this, we will calculate the field "First Down Over Expected" once the models are created.
+
+This model is built using the framework created by Ben Baldwin. For more information on that, see this article:
+https://github.com/guga31bb/fourth_calculator/blob/main/scripts/_go_for_it_model.R 
+
+## Setting up the Model
+
+First things first, we need to load all the intended libraries and our data. 
+
+The "colors" table is a  custom table added to the nflfastR database, using nflfastR data.
+
+IE:
+```
+dbWriteTable(connection, name = "team_color_logos", value = nflfastR::teams_colors_logos, row.names = FALSE)
+```
+
+
+```{r warning=FALSE, message=FALSE}
+
+rm(list = ls())
+
+library(DBI)
+library(RSQLite)
+library(tidyverse)
+library(ggplot2)
+library(ggimage)
+library(ggrepel)
+library(h2o)
+library(zoo)
+library(corrplot)
+
+theme_set(  theme_classic() +
+              theme(axis.title = element_text(size = 12),
+                    axis.text = element_text(size = 8),
+                    plot.title = element_text(size = 13, hjust = 0.5),
+                    plot.subtitle = element_text(size = 8, hjust = 0.5),
+                    plot.caption = element_text(size = 7),
+                    legend.position = "none") 
+            )
+
+
+
+source('https://raw.githubusercontent.com/mrcaseb/nflfastR/master/R/helper_add_nflscrapr_mutations.R')
+
+#### Connect to nflfastR database ####
+path <- "/Users/joeybloom/Desktop/NFLScrapR/database/pbp_db"
+
+connection <- dbConnect(SQLite(), path)
+
+pbp_db <- tbl(connection, "nflfastR_pbp")
+colors <- tbl(connection,"team_color_logos")
+
+```
+
+
+## Get Prediction Data
+
+We will start by grabbing all rush and pass plays that occurred on 3rd or 4th down. 
+
+In order to make it easier to evaluate punt situations later on, we are going to include punt attempts when pulling data. These will be filtered out when modeling begins.
+
+The code in the link above was used as a template for this section.
+
+```{r warning=FALSE}
+
+## Pull data for 3rd/4th down pass/rush attempts
+last_play_drive_t1 <- pbp_db %>% 
+  ## src - @benbaldwin
+  filter(
+    down %in% c(3,4), 
+    qb_kneel == 0,
+    rush == 1 | pass == 1 | punt_attempt == 1,
+    !is.na(posteam),
+    !is.na(yardline_100),
+    !is.na(score_differential),
+    season >= 2006 
+  ) %>% 
+  make_model_mutations()
+
+
+#### Attributes from 3rd/4th down to use as input ####
+last_play_drive_t2 <- last_play_drive_t1 %>% 
+  mutate(yards_gained = 
+          
+           # src - @benbaldwin
+           # we need a way to account for defensive penalties that give auto first downs
+           # hacky "solution" is saying here that a penalty that gives a first down goes for the yards to go
+           # unless the actual penalty yardage is higher
+           
+           # the drawback is that a defensive holding on eg 4th and 8 is coded as an 8 yard gain
+           # the alternative is to estimate a separate model for penalties or have their own category
+           # but first down penalties on 4th and long are very rare:
+           # https://twitter.com/benbbaldwin/status/1322530446371074050
+           
+           case_when(
+             first_down_penalty == 1 & penalty_yards < ydstogo ~ ydstogo, 
+             first_down_penalty == 1 & penalty_yards >= ydstogo ~ penalty_yards, 
+             TRUE ~ yards_gained
+           ),
+         
+         # truncate to make model training easier -- add capping at -10 and 65 yards (src - @benbaldwin) #
+         yards_gained = if_else(yards_gained < -10, -10, yards_gained),
+         yards_gained = if_else(yards_gained > 65, 65, yards_gained),
+         
+         # Vegas expected points to be scored (src - @benbaldwin) #
+         home_total = (spread_line + total_line) / 2,
+         away_total = (total_line - spread_line) / 2,
+         
+         # Determine total/spread for possession team (src - @benbaldwin) #
+         posteam_total = if_else(posteam == home_team, home_total, away_total),
+         posteam_spread = dplyr::if_else(posteam == home_team, spread_line, -1 * spread_line)
+  ) %>%
+  
+  # look at when an actual play is run or a defensive penalty gives a first down (src - @benbaldwin)
+  filter(play_type_nfl %in% c("RUSH", "PASS", "SACK") | first_down_penalty == 1) %>%
+
+  # Select fields for training #  
+  select(
+    
+    ## Match Back/ID Fields 
+    play_id,game_id,posteam,season,
+    
+    ## Prediction Field
+    first_down,
+    
+    ## Play Result Fields
+    yards_gained,air_yards,yards_after_catch,epa,rush,pass,
+    
+    ## @benbaldwin Selected Fields ##
+    down,
+    ydstogo,
+    yardline_100,
+    outdoors, retractable, dome,
+    posteam_spread, total_line, posteam_total,
+    
+    ## JB Selected Fields ##
+    era,
+    week,yardline_100,game_seconds_remaining,season_type,
+    qtr,wp,ep,ydstogo,shotgun,no_huddle,score_differential,
+    desc
+  ) %>% 
+  left_join(
+    colors, by=c('posteam' = 'team_abbr')
+  )
+
+```
+
+
+Let's check out how many first downs actually occurred among the plays pulled:
+
+
+```{r warning=FALSE}
+last_play_drive_t2 %>% 
+  filter(rush == 1 | pass == 1) %>% 
+  count(first_down) %>% 
+  collect() %>% 
+  select(first_down,n) %>% 
+  knitr::kable()
+
+
+```
+
+
+More plays result in a failed conversion than do. Teams are converting about 43% of the time on third and fourth down.
+
+
+
+Let's check this out by each individual down.
+
+```{r warning=FALSE}
+last_play_drive_t2 %>% 
+  filter(rush == 1 | pass == 1) %>% 
+  count(down,first_down) %>% 
+  collect() %>% 
+  select(down,first_down,n) %>% 
+  knitr::kable()
+
+
+```
+
+Though there are a lot less plays occurring on 4th down, from 2006 - 2020, teams are actually converting about 52% of the time, compared to 42% of the time on 3rd down.
+
+##Moving Game Averages and Totals
+
+As a next step, we will calculate moving averages and cumulative sums for rush and pass plays. This will create features such as "average yards per rush" or "total yards gained rushing" for the model. This lets us take into account a team's in-game performance.
+
+To do this, we take several variables and create moving averages / cumulative sums grouped by game and possesion team.
+
+#####Passing Stats
+```{r warning=FALSE}
+
+## Pass Play Fields ##
+cum_fields <- c('epa','yards_gained','air_yards','yards_after_catch')
+
+p_game_summary_t1 <- pbp_db %>% 
+  filter(qb_kneel == 0,
+         pass == 1, 
+         !is.na(posteam),
+         !is.na(yardline_100),
+         !is.na(score_differential),
+         season >= 2006 ) %>% 
+  select(season,week,desc,pass,posteam,game_id,play_id,epa,yards_gained,air_yards,yards_after_catch) %>% 
+  collect() 
+
+p_game_summary_t2 <-  p_game_summary_t1 %>% 
+  #filter(season == 2020 ) %>%   ## FOR TEST - Below function runs longer with lots of data ##
+  group_by(game_id,posteam)
+
+
+## Calculate moving average/cumulative total
+p_game_summary_t3 <- p_game_summary_t2 %>% 
+  mutate_at(
+    vars(cum_fields),funs(## Cumulative/Moving Average ##
+                          "cum_game_avg_PASS"= lag(rollapply(.,seq_along(p_game_summary_t2), mean,align='right',fill=NA)),
+                          
+                          ## Cumulative Sum ##
+                          "cum_game_tot_PASS"= lag(cumsum(.))
+    )
+  ) 
+
+
+## View Chicago Bears Data 
+p_game_summary_t3 %>% 
+  select(posteam,season,week,desc,yards_gained,yards_gained_cum_game_avg_PASS,yards_gained_cum_game_tot_PASS,
+                             air_yards,air_yards_cum_game_avg_PASS,air_yards_cum_game_tot_PASS,
+                             yards_after_catch,yards_after_catch_cum_game_avg_PASS,yards_after_catch_cum_game_tot_PASS,
+                             epa,epa_cum_game_avg_PASS,epa_cum_game_tot_PASS) %>% 
+  filter(posteam=='CHI', season == 2020, week == 1) %>% 
+  head(5) %>% 
+  knitr::kable()
+  
+```
+
+
+
+#####Rushing Stats
+```{r warning=FALSE}
+## Rush Play Fields ##
+cum_fields <- c('epa','yards_gained')
+
+r_game_summary_t1 <- pbp_db %>% 
+  filter(qb_kneel == 0,
+         rush == 1,
+         !is.na(posteam),
+         !is.na(yardline_100),
+         !is.na(score_differential),
+         season >= 2006 ) %>% 
+  select(season,week,desc,posteam,game_id,play_id,epa,yards_gained) %>% 
+  collect() 
+
+r_game_summary_t2 <-  r_game_summary_t1 %>% 
+  #filter(season == 2020 ) %>% ## FOR TEST - Below function runs longer with lots of data ##
+  group_by(game_id,posteam)
+
+
+## Calculate moving average/cumulative total
+r_game_summary_t3 <- r_game_summary_t2 %>% 
+  mutate_at(
+    vars(cum_fields),funs(## Cumulative/Moving Average ##
+                          "cum_game_avg_RUSH"= lag(rollapply(.,seq_along(p_game_summary_t2), mean,align='right',fill=NA)),
+                          
+                          ## Cumulative Sum ##
+                          "cum_game_tot_RUSH"= lag(cumsum(.))
+    )
+  ) 
+
+
+## View Chicago Bears Data
+r_game_summary_t3 %>% 
+  select(posteam,season,week,desc,yards_gained,yards_gained_cum_game_avg_RUSH,yards_gained_cum_game_tot_RUSH,
+                             epa,epa_cum_game_avg_RUSH,epa_cum_game_tot_RUSH) %>% 
+  filter(posteam=='CHI',season == 2020, week == 1) %>% 
+  head(5) %>% 
+  knitr::kable()
+
+```
+
+
+
+
+
+
+##Join Data to Create Model Input
+
+
+We can now join the passing and rushing data back to the 3rd/4th down plays originally pulled.
+
+The datasets can be joined on `game_id` and `play_id`
+
+Because we are joining on play_id, this will result in some null values across the dataset due to how the fields were calculated. This is because rushing attributes were only calculated on rushing plays (vice versa for pass plays), so when matching by play_id, only rush plays will have populated rushing attributes, and only pass plays will have populated passing attributes.
+
+To account for this, we use the `fill` function to populate null values using the most recent value available. For example, if at a point in a time, a team's "average yards gained on rushes" was 5, and they did not rush for 10 straight plays, all 10 of the next pass plays would be populated the same value of 5 for "average yards gained on rushes".
+
+```{r warning=FALSE}
+
+## Create model data with punts 
+model_data_w_punts <- last_play_drive_t2 %>% 
+  collect() %>% 
+  left_join(
+    p_game_summary_t3 %>% ungroup() %>% select(game_id,play_id,c(ends_with("_PASS"))), by = c("play_id" = "play_id", "game_id" = "game_id")
+  ) %>% 
+  left_join(
+    r_game_summary_t3 %>% ungroup() %>% select(game_id,play_id,c(ends_with("_RUSH"))), by = c("play_id" = "play_id", "game_id" = "game_id")
+  ) %>% 
+  group_by(game_id,posteam) %>% 
+  
+  ## Fill to account for null values 
+  fill(starts_with('epa_')
+       ,starts_with('yards_gained_')
+       ,starts_with('yards_after_catch_')
+       ,starts_with('air_yards_'), .direction = "down") %>% 
+  ungroup()
+
+
+## Create final model data with rush/pass attempts
+model_data <- model_data_w_punts %>% 
+  filter(rush == 1 | pass == 1)
+  
+
+
+## Modeling Input Fields ##
+list(names(model_data))
+
+
+## View Chicago Bears Model Data for a week
+model_data %>% 
+  filter(season == 2020,
+         posteam == 'CHI',
+         week == 1) %>% 
+    select(game_id,play_id,qtr,ydstogo,score_differential,wp,ep,shotgun,game_seconds_remaining,desc
+       ,starts_with('epa_')
+       ,starts_with('yards_gained_')
+       ,starts_with('yards_after_catch_')
+       ,starts_with('air_yards_')) %>% 
+  head(5) %>% 
+  knitr::kable()
+
+```
+
+
+
+This dataset is going to be fed into h2o to create a few different models (different algorithms)
+
+
+##Data interogation
+Before modeling, we should look at the data to see what we are working with.
+
+
+To get an idea of what the data looks like, we can summarize all the numeric attributes in the datasets.
+
+####Summarize Data 
+```{r warning=FALSE}
+ model_data %>%
+   select_if(is.numeric) %>% 
+   #select(ydstogo,shotgun,wp,ep,ends_with("_RUSH"),ends_with("_PASS")) %>%
+   summary()
+
+
+```
+
+A few things to note:
+
+* There are a lot of null values for `air_yards` and `yards_after_catch`. Dropback attempts with no actual pass attempt (IE sacks) result in null `air_yards` and incomplete passes result in null `yards_after_catch`.
+* Teams pass about 82.5% of the time and set up in shot gun about 84.4% of the time on 3rd/4th down
+
+
+
+We can also look to see what attributes are correlated to one another. Below is a correlation matrix with a handful of selected fields.
+
+####Check for correlations 
+```{r warning=FALSE, fig.width = 10, fig.height = 10}
+ c <- model_data %>%
+  ungroup() %>% 
+   select(ends_with("_RUSH"),ends_with("_PASS"),
+    
+    ydstogo,
+    posteam_spread, posteam_total,
+
+    yardline_100,game_seconds_remaining,
+    qtr,wp,ep,shotgun,no_huddle,score_differential,
+    
+    first_down
+    ) %>% 
+   #na.omit() %>%
+   select_if(is.numeric) %>% 
+   cor(use="complete.obs" )
+
+ corrplot(c,tl.cex=.8,tl.col="black")
+```
+
+Yards to go has the strongest correlation with first down conversion rate. As yards to go increases, the probabiliy of converting drops. This is obvious. We can see that the shotgun indicator also has a negative correlation with conversion rate, likely because shotgun and yards to go are also positivley correlated with one another. 
+
+There are additional attributes that are strongly correlated with one another. 
+
+* Positive correlation between score differential and win probability
+* Negative correlation between yard line 100 and expected points
+* Negative correlation between game seconds remaining and rush/pass yards gained total. As time decreases, total yards over time increases
+* Positive correlations between EPA and total yards gained sum/average fields (both rushes and passes). More yards/higher average yards generally leads to higher EPA.
+ 
+
+##Build Models
+
+It is time to build some models using the dataset we created.
+
+These will be classication models that predict if a 3rd or 4th down attempt will result in a first down conversion. The fields we created (cum_game_tot and cum_game_avg fields), and game condition attributes (yards to go, time remaining, yard line, etc.) will be used as inputs to the models.
+
+I use the package h2o for modeling. For more information on h2o, here is their website:
+
+https://www.h2o.ai/
+
+
+To start with h2o, we need to initiate a cluster.
+
+```{r warning=FALSE}
+
+h2o.init()
+h2o.no_progress()
+
+```
+
+
+
+
+####Split Data
+
+In order to effectively evaluate the models, we must split the data we created into "test" and "train" datasets. Models will be built using the training data and then evaluated against the test data to see how they perform on new data.
+
+In this case, we will train on seasons from 2006 - 2017 and test on seasons from 2018 - 2020.
+
+We also need to convert the "first_down" field to a factor in order for h2o to recognize that this is a classification problem.
+```{r}
+## Split train and test data - test on 2018 - 2020 ##
+train <- model_data %>% filter(season <= 2017) %>% as.h2o()
+test <- model_data %>% filter(season > 2017) %>% as.h2o()
+
+## Make prediction variable factor ##
+train$first_down <- as.factor(train$first_down)
+```
+
+####General Linear Model
+
+We will start with a generalized linear model (GLM). 
+
+
+```{r warning=FALSE, fig.height=7, fig.width=7}
+
+#### BASE GLM ####
+
+## The setdiff command is a way to exclude certain fields from a list. The fields listed below are not included in the model.
+## All other attributes will be included.
+
+vars <- setdiff(names(train),c("play_id","game_id","first_down","posteam","season","desc","season_type","down","total_line","outdoors","no_huddle","epa","yards_gained","yards_after_catch","air_yards","qtr","wp","ep","shotgun","rush","pass","team_name","team_id","team_nick","team_color","team_color2","team_color3","team_color4","team_logo_wikipedia","team_logo_espn","team_wordmark"))
+
+cvrt_glm <- h2o.glm(x = vars, 
+                   y = "first_down", 
+                   training_frame = train,
+                   model_id = "4th_cvrt_glm_fit",
+                   nfolds = 10,
+                   keep_cross_validation_predictions = TRUE,
+                   family = 'binomial',
+                   seed=1985)  
+
+
+
+## training metrics ##
+h2o.logloss(cvrt_glm)
+h2o.auc(cvrt_glm)
+h2o.varimp(cvrt_glm) %>% 
+  as_tibble() %>% 
+  ggplot(aes(x = reorder(variable,relative_importance), y = relative_importance)) + 
+  geom_text(aes(label = round(relative_importance,2)),hjust = -.2,size = 2) +
+  geom_bar(stat='identity',fill = 'dark blue') +
+  labs(
+    title = 'Variable Importance',
+    subtitle = 'Generalized Linear Model, Trained on Seasons 2006 - 2017',
+    caption = "Joey Bloom - @data_bears (Data - nflfastR)",
+    y = "Relative Importance"
+  ) +
+  coord_flip() 
+
+
+```
+
+
+#####Train Summary
+Yards to go has the most weight in the model by quite a bit. The gap between the next most import feature (GLM relative importance is based on standardized coefficients - source h2o) is over 0.5. The posession team's estimated total points (posteam_total) is the second most predictive followed by yard line, but they do not come close to yards to go.
+
+Most of the cumulative average and total fields calculated hold little importance, but some are worth noting. 
+
+Cumulative total number of rush yards is the 4th most important variable and total EPA on rushes is 6th. It appears that a teams rushing performance within a game does hold some power in predicting if a team will convert. The 8th most important feature is total EPA on pass plays.
+
+
+#####Test Results
+Let's see how the model performs on our test data.
+
+```{r warning=FALSE}
+
+
+glm_base_cvrt <- h2o.performance(cvrt_glm,newdata = test)
+
+h2o.logloss(glm_base_cvrt) 
+h2o.auc(glm_base_cvrt) 
+h2o.confusionMatrix(glm_base_cvrt)
+h2o.accuracy(glm_base_cvrt) %>% arrange(desc(accuracy)) %>% head(5)
+```
+
+The main metrics I look at are AUC and Log Loss. AUC is a good measure for how good the overall model is across many different cutoff points whereas Log Loss helps indicate how correct the model's prediction was by comparing the true result to the predicted probabilty (using log functions). Good models have high AUC and low Log Loss (both measured between 0 and 1).
+
+For more information, you can refer to this link from the "Hands on Machine Learning with R" book:
+
+https://bradleyboehmke.github.io/HOML/process.html#model-eval
+
+The final results for the GLM model are below:
+
+```
+LogLoss:  0.6273489
+AUC:      0.68967
+```
+
+####Random Forest
+
+
+Now onto the Random Forest model (RF). 
+
+
+```{r warning=FALSE}
+
+#### BASE RF ####
+vars <- setdiff(names(train),c("play_id","game_id","first_down","posteam","season","desc","season_type","down","total_line","outdoors","no_huddle","epa","yards_gained","yards_after_catch","air_yards","qtr","wp","ep","shotgun","rush","pass","team_name","team_id","team_nick","team_color","team_color2","team_color3","team_color4","team_logo_wikipedia","team_logo_espn","team_wordmark"))
+
+cvrt_rf <- h2o.randomForest(x = vars, 
+                            y = "first_down", 
+                            training_frame = train,
+                            model_id = "4th_cvrt_rf_fit1",
+                            nfolds = 10,
+                            keep_cross_validation_predictions = TRUE,
+                            seed=1985)  
+```
+
+```{r warning=FALSE, fig.height=7, fig.width=7}
+
+## training metrics ##
+h2o.logloss(cvrt_rf)
+h2o.auc(cvrt_rf)
+h2o.varimp(cvrt_rf) %>% 
+  as_tibble() %>% 
+  ggplot(aes(x = reorder(variable,relative_importance), y = relative_importance)) + 
+  geom_text(aes(label = round(relative_importance,2)),hjust = -.2,size = 2) +
+  geom_bar(stat='identity',fill = 'dark blue') +
+  ylim(c(0,50000)) +
+  labs(
+    title = 'Variable Importance',
+    subtitle = 'Random Forest Model, Trained on Seasons 2006 - 2017',
+    caption = "Joey Bloom - @data_bears (Data - nflfastR)",
+    y = "Relative Importance"
+  ) +
+  coord_flip() 
+```
+
+
+#####Train Summary
+Similar to the GLM model, yards to go is the most important feature, with yard line and possession team total being strong predictiors as well.
+
+Some differences between the 2 models - game seconds remaining has much more importance in the RF model than it does in the GLM. Additionally, cumulative total passing EPA and yards gained, as well as average air yards hold more weight in the RF model than the GLM. The RF model favors using the passing attributes much more than it does the rushing attributes and these fields also hold a fair amount more importance in the RF model.
+
+Another difference to note between the 2 models is that the RF model is not as dominated by yards to go as the GLM model is. In both models, yards to go is the most important feature by a significant amount, but looking at the graphs, it is clear that the dropoff in importance on the GLM model is larger than it is on the RF model after yards to go. In this case, there is about a 25k difference (RF relative importance is based on whether a field was selected to split on during the tree building process and how much the squared error improved as a result - source h2o) between the top 2 most important fields. It is also worth noting that the other attributes after the top field hold more weight in the RF model than in the GLM model.
+
+#####Test Results
+
+Now lets check out the RF model's performance on the test data.
+
+```{r warning=FALSE}
+
+rf_base_cvrt <- h2o.performance(cvrt_rf,newdata = test)
+
+h2o.logloss(rf_base_cvrt) 
+h2o.auc(rf_base_cvrt) 
+h2o.confusionMatrix(rf_base_cvrt)
+h2o.accuracy(rf_base_cvrt) %>% arrange(desc(accuracy)) %>% head(5)
+```
+
+
+
+The GLM model is performing slightly better than the RF model based on AUC and Log Loss (higher AUC and lower Log Loss).
+
+```
+RF:
+LogLoss:  0.6371137
+AUC:      0.67431
+
+GLM:
+LogLoss:  0.6273489
+AUC:      0.68967
+```
+
+More tuning can be done to improve each model, but for now, let's take a look at some of the predictions on the test data using the GLM model.
+
+
+
+##First Downs Over Expected (FDOE)
+
+In order to evaluate the test data, we will calculate the field "FDOE", which represents "First Down Over Expected".
+
+This is calculated by taking the result of the play (first down = 1 or first down = 0) and subtracting the probability the play would result in a first down (0 - 1).
+
+For example:
+ - if a play had a 75% chance of resulting in a first down, and it does result in a first down:
+   fdoe = first_down - prob_succeed => 1 - .75 => .25
+
+ - if a play had a 75% chance of resulting in a first down, and it does not result in a first down:
+   fdoe = first_down - prob_succeed => 0 - .75 => -.75
+   
+We can take the total FDOE per play by team to get an idea of which teams were good at converting on 3rd/4th downs.
+
+
+```{r warning=FALSE, fig.width=10, fig.height=10}
+
+
+
+
+## Bind test data with model predictions by column
+test_preds <- test %>% as_tibble() %>% 
+  bind_cols(
+    
+    ## GLM Predictions ##
+    h2o.predict(cvrt_glm,test) %>% as_tibble() %>% 
+      mutate(prob_fail_glm = p0,
+             prob_succeed_glm = p1) %>% 
+      select(prob_fail_glm,prob_succeed_glm)
+  ) %>% 
+    bind_cols(
+      
+    ## RF Predictions ##
+    h2o.predict(cvrt_rf,test) %>% as_tibble() %>% 
+      mutate(prob_fail_rf = p0,
+             prob_succeed_rf = p1) %>% 
+      select(prob_fail_rf,prob_succeed_rf)
+  ) %>% 
+  select(desc,game_id,play_id,season,week,qtr,down,ydstogo,yardline_100,posteam,
+         down,ep,wp,first_down,prob_fail_glm,prob_succeed_glm,prob_fail_rf,prob_succeed_rf,team_logo_espn,team_color,team_color2) %>% 
+  mutate(fdoe_glm = first_down - prob_succeed_glm,
+         fdoe_rf  = first_down - prob_succeed_rf)
+
+## Save Predictions
+test_preds %>% write.csv("/Users/joeybloom/Desktop/NFLScrapR/GIT/nflfastR/MODELS/Fourth_Down_Convert/SHINY/2018_2020_GLM_FDOE.csv")
+
+```
+
+
+#####Calibration Plots
+
+To make it easier to evaluate each model, I create a function that works with our dataset to create calibration plots inspired by the Yurko et al. paper.
+```{r warning=FALSE}
+plot_calibration <- function(model_type){
+
+prob_field <-paste0("prob_succeed_",model_type) 
+  
+test_preds[["prob_field"]] <- test_preds[[prob_field]]
+
+cal_plot <- test_preds %>%
+  # Create BINS for wp:
+  mutate(bin_pred_prob = round(prob_field / 0.05) * .05) %>%
+  group_by(bin_pred_prob) %>%
+  # Calculate the calibration results:
+  summarize(
+    n_plays = n(),
+    n_first_downs = length(which(first_down == 1)),
+    bin_actual_prob = n_first_downs / n_plays
+  ) %>%
+  ungroup()
+
+ann_text <- data.frame(
+  x = c(.25, 0.75), y = c(0.75, 0.25),
+  lab = c("More times\nthan expected", "Fewer times\nthan expected")
+)
+
+cal_plot %>%
+  ggplot() +
+  geom_point(aes(x = bin_pred_prob, y = bin_actual_prob, size = n_plays)) +
+  geom_smooth(aes(x = bin_pred_prob, y = bin_actual_prob), method = "loess") +
+  geom_abline(slope = 1, intercept = 0, color = "black", lty = 2) +
+  coord_equal() +
+  scale_x_continuous(limits = c(0, 1)) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(
+    size = "Number of plays",
+    x = "Estimated Conversion Probability",
+    y = "Observed Conversion Probability",
+    title = paste0("3rd/4th Down Conversion ",str_to_upper(model_type)," Calibration Plot")
+  ) +
+  geom_text(data = ann_text, aes(x = x, y = y, label = lab), size = 2) +
+  theme_bw() +
+  theme(axis.title = element_text(size = 12),
+                    axis.text = element_text(size = 8),
+                    plot.title = element_text(size = 13, hjust = 0.5),
+                    plot.subtitle = element_text(size = 8, hjust = 0.5),
+                    plot.caption = element_text(size = 7),
+                    legend.position = "none")
+}
+```
+
+######GLM
+```{r warning=FALSE, fig.width=7, fig.height=7}
+
+plot_calibration('glm')
+
+```
+
+
+######RF
+```{r warning=FALSE, fig.width=7, fig.height=7}
+
+plot_calibration('rf')
+
+```
+
+Using the GLM model, let's see what First Downs over Expected looks like since 2018 by team.
+```{r warning=FALSE,fig.height=8,fig.width=10}
+
+## View Teams by FDOE
+plt <- test_preds %>% 
+  filter(qtr %in% c(1,2,3,4,5),
+         season %in% c(2018,2019,2020),
+         week >= 1 & week <= 17,
+         down %in% c(3,4)) %>% 
+  group_by(posteam,team_color,team_logo_espn) %>% 
+  summarise(
+    total_fdoe = sum(fdoe_glm),
+    avg_fdoe =  mean(fdoe_glm)
+  ) %>% 
+  arrange(desc(total_fdoe)) %>% 
+  ungroup() %>% 
+  mutate(label_pos = ifelse(total_fdoe < 0, 2, -2)) 
+
+
+## Plot total FDOE by Team 
+plt %>% 
+  ggplot(aes(x = reorder(posteam,total_fdoe), y = total_fdoe)) + 
+  geom_bar(stat='identity',fill = plt$team_color,width = .7) +
+  geom_image(aes(x=reorder(posteam,total_fdoe),y=total_fdoe,image = team_logo_espn),asp = 16/9,size=.027) +
+  geom_text(aes(x = reorder(posteam,total_fdoe), y = label_pos, label = round(total_fdoe,2)),size = 4) +
+  labs(
+    title = 'First Downs Over Expected',
+    subtitle = '2018 - 2020, Weeks 1-17, Quarters 1-5, 3rd/4th Downs, Rush + Pass Plays, FDOE calculated from Generalized Linear Model',
+    caption = "Joey Bloom - @data_bears (Data - nflfastR)",
+    y = "Total FDOE"
+  ) +
+  theme_classic() +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        plot.title = element_text(size = 13, hjust = 0.5),
+        plot.subtitle = element_text(size = 8, hjust = 0.5),
+        plot.caption = element_text(size = 7),
+        legend.position = "none",
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) +
+  coord_flip() 
+
+
+
+
+```
+
+
+#####Team Results
+Bears fans, shield your eyes! 
+
+Since 2018, in the regular season, Chicago ranks 4th worst in FDOE throughout the league with a total of -14.75. 
+
+On the contrary, Baltimore ranks the highest with a total of 36.49 holding a fairly large gap above the next best team (ATL - 26.99).
+
+Surprisingly, New England has the 2nd worst FDOE with -21.76 total FDOE.
+
+Half of the teams in the league have an FDOE above 0 since 2018. 
+
+To play around with these results some more, visit this Shiny Dashboard below:
+https://nflpredictor.shinyapps.io/3rd_4th_converter/
+
+##Summary
+
+For my first model in the NFL world, there are a couple of takeaways I have from this and some next steps.
+
+Though it probably was obvious, yards to go is the biggest predictor in whether or not the result will be a first down. It also appears that using some form of moving averages and/or cumulative sums to track in game stats can help improve the model.
+
+The initial findings on the 2018-2020 shed some light on who did well and who struggled on 3rd/4th downs relative to what was expected. Baltimore has been converting on 3rd/4th down at a rate much higher than expected where the Jets are the exact opposite.
+
+Some next steps to enhance what has been done here would looking to refine the in game stats, for example, looking back at "N" plays instead of the whole  game (IE, avg yards gained on previous 3/5/10 plays). We could also look at FDOE for individual players to see deeper into a team's FDOE or look at which defenses are most effective in these situations. Additionally, just like the 4th down model from Ben Baldwin that inspired this article, this model could be used within a larger framework to help make decisions about what to do on 4th downs.
+
+If you got this far, thank you so much for reading through and I hope you got something meaningful from this!
+
+Any and all feedback is much appreciated! Shoutout to Ben Baldwin and the whole nflfastR/twitter analytics community. If you see a hole in the logic or have any criticism, please feel free to reach out!
+
+*written by Joey Bloom (@data_bears)*
+
+*data from nflfastR*
+
+*modeled after Ben Baldwin's nfl4th model (@BenBaldwin)*
+
