@@ -25,7 +25,7 @@ ui <- fluidPage(
         submitButton(text = "Update Chart", icon = NULL, width = NULL),
 
         ## Pitch name selection ##
-        textInput("pitcher_name", label = h5("Pitcher Name"), value = "Lucas Giolito"),
+        textInput("pitcher_name", label = h5("Pitcher Name"), value = "Jacob deGrom"),
         h6("Enter a Pitchers full name"),
 
         
