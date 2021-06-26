@@ -1,0 +1,11 @@
+name: mlb_spin_rate
+title:
+username:
+account: nflpredictor
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 4323181
+bundleId: 4760015
+url: https://nflpredictor.shinyapps.io/mlb_spin_rate/
+when: 1624746974.16334
+lastSyncTime: 1624746974.16335
