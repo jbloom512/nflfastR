@@ -134,7 +134,7 @@ last_play_drive_t2 <- last_play_drive_t1 %>%
   select(
     
     ## Match Back/ID Fields 
-    play_id,game_id,posteam,season,
+    play_id,game_id,posteam,defteam,name,season,
     
     ## Prediction Field
     first_down,
@@ -465,7 +465,7 @@ We will start with a generalized linear model (GLM).
 ## The setdiff command is a way to exclude certain fields from a list. The fields listed below are not included in the model.
 ## All other attributes will be included.
 
-vars <- setdiff(names(train),c("play_id","game_id","first_down","posteam","season","desc","season_type","down","total_line","outdoors","no_huddle","epa","yards_gained","yards_after_catch","air_yards","qtr","wp","ep","shotgun","rush","pass","team_name","team_id","team_nick","team_color","team_color2","team_color3","team_color4","team_logo_wikipedia","team_logo_espn","team_wordmark"))
+vars <- setdiff(names(train),c("play_id","game_id","first_down","posteam","season","desc","season_type","down","total_line","outdoors","no_huddle","epa","yards_gained","yards_after_catch","air_yards","qtr","wp","ep","shotgun","rush","pass","team_name","team_id","team_nick","team_color","team_color2","team_color3","team_color4","team_logo_wikipedia","team_logo_espn","team_wordmark","defteam","name"))
 
 cvrt_glm <- h2o.glm(x = vars, 
                    y = "first_down", 
@@ -542,7 +542,7 @@ Now onto the Random Forest model (RF).
 ```{r warning=FALSE}
 
 #### BASE RF ####
-vars <- setdiff(names(train),c("play_id","game_id","first_down","posteam","season","desc","season_type","down","total_line","outdoors","no_huddle","epa","yards_gained","yards_after_catch","air_yards","qtr","wp","ep","shotgun","rush","pass","team_name","team_id","team_nick","team_color","team_color2","team_color3","team_color4","team_logo_wikipedia","team_logo_espn","team_wordmark"))
+vars <- setdiff(names(train),c("play_id","game_id","first_down","posteam","season","desc","season_type","down","total_line","outdoors","no_huddle","epa","yards_gained","yards_after_catch","air_yards","qtr","wp","ep","shotgun","rush","pass","team_name","team_id","team_nick","team_color","team_color2","team_color3","team_color4","team_logo_wikipedia","team_logo_espn","team_wordmark","defteam","name"))
 
 cvrt_rf <- h2o.randomForest(x = vars, 
                             y = "first_down", 
@@ -622,9 +622,9 @@ test_preds <- test %>% as_tibble() %>%
       mutate(prob_fail_rf = p0,
              prob_succeed_rf = p1) %>% 
       select(prob_fail_rf,prob_succeed_rf)
-  ) %>% 
-  select(desc,game_id,play_id,season,week,qtr,down,ydstogo,yardline_100,posteam,pass,starts_with("yards_gained_"),
-         down,ep,wp,first_down,prob_fail_glm,prob_succeed_glm,prob_fail_rf,prob_succeed_rf,team_logo_espn,team_color,team_color2) 
+  ) #%>% 
+  #select(desc,game_id,play_id,season,week,qtr,down,ydstogo,yardline_100,posteam,pass,starts_with("yards_gained_"),
+         #down,ep,wp,first_down,prob_fail_glm,prob_succeed_glm,prob_fail_rf,prob_succeed_rf,team_logo_espn,team_color,team_color2) 
 
 
 plot_calibration <- function(model_type){
